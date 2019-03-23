@@ -2,10 +2,11 @@ const fs = require ('fs');
 const path = require ('path');
 
 const DEFAULT_OPTIONS = {
+  keepOptions: false,
+  stripPII: false,
   input: 'dlive.tv.har', 
   url: 'https://graphigo.prd.dlive.tv/',
-  output: 'dlive.tv.har.extracted',
-  keepOptions: false
+  output: 'extracted.dlive.tv.har'
 };
 
 function extractSelfDetails () {
@@ -24,6 +25,7 @@ function maybeExtractOptionalArguments (options) {
   while ((nextArg = process.argv.shift ())) {
     switch (nextArg) {
       case '-k': options.keepOptions = true; break;
+      case '-s': options.stripPII = false; break;
       case '-i': required ('input',  (options.input  = process.argv.shift ())); break;
       case '-o': required ('output', (options.output = process.argv.shift ())); break;
       case '-u': required ('url',    (options.url    = process.argv.shift ())); break;
@@ -53,6 +55,8 @@ function processArguments() {
       `Usage: ${selfDetails.cmd} ${selfDetails.file} [options]\n\n` +
       '  -k        keep OPTIONS requests.\n' +
       `            default: ${DEFAULT_OPTIONS.keepOptions}\n` +
+      '  -s        strip personally identifiable information.\n' +
+      `            default: ${DEFAULT_OPTIONS.stripPII}\n` +
       '  -i input  the path to the .har you want to parse.\n' +
       `            default: ${DEFAULT_OPTIONS.input}\n` +
       '  -o output the path to what output file you want.\n' +
@@ -87,6 +91,31 @@ function writeOrCreateTextFile (fileName, data, callback) {
   });
 }
 
+function shouldRemoveBecauseUrlIsWrong (item, options) {
+  return item.request.url !== options.url;
+}
+function shouldRemoveBecauseIsOptions (item, options) {
+  return (!options.keepOptions && 'OPTIONS' === item.request.method);
+}
+
+function filterOutIrrelevantLogEntries(harObject, options) {
+  harObject.log.entries = harObject.log.entries.filter ((item) => {
+    return !(shouldRemoveBecauseUrlIsWrong (item, options) ||
+             shouldRemoveBecauseIsOptions  (item, options));
+  });
+}
+
+function shouldStripPIIFromEntries(harObject, options) {
+  if (!options.stripPII) { return; }
+  harObject.log.entries = harObject.log.entries.map ((item) => {
+
+    // TODO: determine which requests contain PII
+    // TODO: replace that PII with something generic.
+
+    return item;
+  });
+}
+
 //////////
 // Main //
 //////////
@@ -97,14 +126,11 @@ fs.readFile (options.input, 'utf8', (err, data) => {
   if (err) throw err;
   
   let harObject = JSON.parse (data);
-  let requests = harObject.log.entries;
 
-  let json = JSON.stringify(requests.filter ((item) => {
-    return (item.request.url === options.url 
-        && (options.keepOptions || 'OPTIONS' !== item.request.method));
-  }), null, 2);
+  filterOutIrrelevantLogEntries(harObject, options);
+  shouldStripPIIFromEntries(harObject, options);
 
-  writeOrCreateTextFile (options.output, json, (err) => {
+  writeOrCreateTextFile (options.output, JSON.stringify(harObject, null, 2), (err) => {
     if (err) throw err;
 
     console.log (options.output + ' written!');
